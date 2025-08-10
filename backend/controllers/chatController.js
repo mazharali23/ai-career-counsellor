@@ -1,60 +1,38 @@
-// controllers/chatController.js
-const ChatSession = require('../models/ChatSession');
+const MLService = require('../services/mlService');
 const User = require('../models/User');
-const CareerRecommendationService = require('../services/careerRecommendationService');
-const NLPService = require('../services/nlpService');
 
 class ChatController {
   async processMessage(req, res) {
     try {
       const { userId, message, sessionId } = req.body;
+      const user = await User.findById(userId);
       
-      // Get or create chat session
-      let session = await ChatSession.findOne({ sessionId, userId });
-      if (!session) {
-        session = new ChatSession({
-          userId,
-          sessionId,
-          messages: []
-        });
+      // Enhanced NLP processing
+      const intent = this.classifyIntent(message);
+      const entities = this.extractEntities(message);
+      
+      let botResponse;
+      
+      switch (intent) {
+        case 'career_recommendation':
+          botResponse = await this.handleCareerRecommendation(user, entities);
+          break;
+        case 'skill_assessment':
+          botResponse = await this.handleSkillAssessment(user, entities);
+          break;
+        case 'interest_exploration':
+          botResponse = await this.handleInterestExploration(user, entities);
+          break;
+        default:
+          botResponse = await this.handleGeneralConversation(message, user);
       }
       
-      // Add user message
-      session.messages.push({
-        sender: 'user',
-        content: message,
-        timestamp: new Date()
-      });
-      
-      // Process message with NLP
-      const nlpResult = await NLPService.processMessage(message);
-      
-      // Generate bot response based on current stage
-      const botResponse = await this.generateBotResponse(session, nlpResult, userId);
-      
-      // Add bot response
-      session.messages.push({
-        sender: 'bot',
-        content: botResponse.content,
-        messageType: botResponse.type,
-        metadata: {
-          intent: nlpResult.intent,
-          confidence: nlpResult.confidence,
-          entities: nlpResult.entities
-        }
-      });
-      
-      // Update session stage if needed
-      if (botResponse.nextStage) {
-        session.currentStage = botResponse.nextStage;
-      }
-      
-      await session.save();
+      // Save conversation to database
+      await this.saveChatMessage(userId, sessionId, message, botResponse);
       
       res.json({
         success: true,
-        response: botResponse,
-        sessionStage: session.currentStage
+        response: botResponse
       });
       
     } catch (error) {
@@ -66,108 +44,104 @@ class ChatController {
     }
   }
   
-  async generateBotResponse(session, nlpResult, userId) {
-    const user = await User.findById(userId);
-    const stage = session.currentStage;
+  classifyIntent(message) {
+    const lowerMessage = message.toLowerCase();
     
-    switch (stage) {
-      case 'introduction':
-        return this.handleIntroduction(nlpResult, user);
-      case 'assessment':
-        return this.handleAssessment(nlpResult, user);
-      case 'exploration':
-        return this.handleExploration(nlpResult, user);
-      case 'recommendation':
-        return this.handleRecommendation(nlpResult, user);
-      default:
-        return this.handleFollowup(nlpResult, user);
+    if (lowerMessage.includes('career') || lowerMessage.includes('job') || lowerMessage.includes('recommend')) {
+      return 'career_recommendation';
     }
-  }
-  
-  async handleIntroduction(nlpResult, user) {
-    if (!user.profile.interests || user.profile.interests.length === 0) {
-      return {
-        content: `Hi ${user.name}! I'm here to help you explore career paths that match your interests and skills. Let's start by understanding what you enjoy doing. What subjects or activities do you find most interesting?`,
-        type: 'text',
-        nextStage: 'assessment'
-      };
+    if (lowerMessage.includes('skill') || lowerMessage.includes('ability')) {
+      return 'skill_assessment';
+    }
+    if (lowerMessage.includes('interest') || lowerMessage.includes('like') || lowerMessage.includes('enjoy')) {
+      return 'interest_exploration';
     }
     
-    return {
-      content: `Welcome back, ${user.name}! I see you've already shared some interests with me. Would you like to continue exploring career options or update your profile?`,
-      type: 'options',
-      options: ['Continue exploring careers', 'Update my profile', 'Take career assessment']
-    };
+    return 'general';
   }
   
-  async handleAssessment(nlpResult, user) {
-    const { intent, entities } = nlpResult;
-    
-    if (intent === 'share_interests') {
-      // Extract interests from entities
-      const interests = entities.interests || [];
-      user.profile.interests = [...new Set([...user.profile.interests, ...interests])];
-      await user.save();
+  async handleCareerRecommendation(user, entities) {
+    try {
+      if (!user.profile || !user.profile.interests || user.profile.interests.length === 0) {
+        return {
+          content: "I'd love to help you with career recommendations! First, let me learn about your interests. What subjects or activities do you enjoy most?",
+          type: 'question',
+          nextSteps: ['collect_interests']
+        };
+      }
+      
+      // Get ML-powered recommendations
+      const recommendations = await MLService.getCareerRecommendations({
+        interests: user.profile.interests,
+        skills: user.profile.skills || [],
+        education: user.profile.education?.level || 'bachelor'
+      });
       
       return {
-        content: `Great! I've noted that you're interested in ${interests.join(', ')}. Now, tell me about your academic strengths. What subjects do you perform well in?`,
-        type: 'text'
+        content: "Based on your profile, I've found some great career matches for you!",
+        type: 'career_recommendations',
+        recommendations: recommendations,
+        followUp: "Would you like me to explain more about any of these careers, or help you explore the requirements?"
+      };
+      
+    } catch (error) {
+      console.error('Career recommendation error:', error);
+      return {
+        content: "I'm having trouble generating recommendations right now. Let's start by updating your profile with your interests and skills.",
+        type: 'fallback'
       };
     }
+  }
+  
+  async handleInterestExploration(user, entities) {
+    // Extract interests from user message
+    const mentionedInterests = this.extractInterests(entities.originalMessage);
     
-    if (intent === 'share_skills') {
-      const skills = entities.skills || [];
-      user.profile.skills = [...new Set([...user.profile.skills, ...skills])];
-      await user.save();
+    if (mentionedInterests.length > 0) {
+      // Update user profile
+      const currentInterests = user.profile?.interests || [];
+      const updatedInterests = [...new Set([...currentInterests, ...mentionedInterests])];
+      
+      await User.findByIdAndUpdate(user._id, {
+        'profile.interests': updatedInterests
+      });
       
       return {
-        content: `Excellent! Based on what you've shared, I think we have enough information to explore some career options. Let me analyze your profile and suggest some paths that might interest you.`,
-        type: 'text',
-        nextStage: 'recommendation'
+        content: `Great! I've noted that you're interested in ${mentionedInterests.join(', ')}. These interests could lead to exciting career paths. What skills do you feel strongest in?`,
+        type: 'interest_confirmation',
+        interests: mentionedInterests,
+        nextStep: 'collect_skills'
       };
     }
     
     return {
-      content: `I'd like to learn more about your skills and interests. Can you tell me about any subjects you excel in or activities you enjoy?`,
-      type: 'text'
+      content: "I'd love to learn about your interests! What subjects, activities, or topics do you find most engaging? For example: technology, art, helping others, science, business, etc.",
+      type: 'interest_collection'
     };
   }
   
-  async handleRecommendation(nlpResult, user) {
-    const recommendations = await CareerRecommendationService.getRecommendations(user);
+  extractInterests(message) {
+    const interestKeywords = {
+      'technology': ['tech', 'technology', 'computer', 'programming', 'coding', 'software'],
+      'science': ['science', 'physics', 'chemistry', 'biology', 'research'],
+      'math': ['math', 'mathematics', 'numbers', 'statistics', 'calculus'],
+      'art': ['art', 'design', 'creative', 'drawing', 'painting', 'visual'],
+      'business': ['business', 'entrepreneurship', 'management', 'finance', 'marketing'],
+      'helping others': ['helping', 'people', 'community', 'social', 'volunteer'],
+      'health': ['health', 'medical', 'doctor', 'nurse', 'healthcare'],
+      'education': ['teaching', 'education', 'learning', 'school', 'training']
+    };
     
-    return {
-      content: `Based on your interests in ${user.profile.interests.join(', ')} and your skills, here are some career paths I'd recommend for you:`,
-      type: 'recommendation',
-      recommendations: recommendations.slice(0, 5),
-      nextStage: 'exploration'
-    };
-  }
-  
-  async handleExploration(nlpResult, user) {
-    if (nlpResult.intent === 'career_details') {
-      const careerName = nlpResult.entities.career;
-      const careerDetails = await CareerRecommendationService.getCareerDetails(careerName);
-      
-      return {
-        content: `Here's detailed information about ${careerName}:`,
-        type: 'career_details',
-        careerDetails: careerDetails
-      };
-    }
+    const foundInterests = [];
+    const lowerMessage = message.toLowerCase();
     
-    return {
-      content: `Would you like to learn more about any of these careers, or shall I help you find educational opportunities and scholarships?`,
-      type: 'options',
-      options: ['Learn more about careers', 'Find educational opportunities', 'Explore scholarships']
-    };
-  }
-  
-  async handleFollowup(nlpResult, user) {
-    return {
-      content: `Is there anything else I can help you with regarding your career planning?`,
-      type: 'text'
-    };
+    Object.keys(interestKeywords).forEach(interest => {
+      if (interestKeywords[interest].some(keyword => lowerMessage.includes(keyword))) {
+        foundInterests.push(interest);
+      }
+    });
+    
+    return foundInterests;
   }
 }
 

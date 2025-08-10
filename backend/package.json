@@ -4,8 +4,9 @@
   "description": "Backend for AI Career Counsellor Platform",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+   "dev": "NODE_OPTIONS='--no-deprecation' nodemon server.js",
+    "start": "NODE_OPTIONS='--no-deprecation' node server.js",
+    "clean-start": "node kill-and-start.js",
     "build": "npm install"
   },
   "engines": {
@@ -15,12 +16,13 @@
     "axios": "^1.5.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
+    "dotenv": "^16.6.1",
     "express": "^4.18.2",
     "express-rate-limit": "^6.8.1",
     "helmet": "^7.0.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^7.5.0",
+    "openai": "^5.12.2",
     "socket.io": "^4.7.2",
     "uuid": "^9.0.1"
   }

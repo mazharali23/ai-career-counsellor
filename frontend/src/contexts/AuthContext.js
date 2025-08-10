@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const AuthContext = createContext();
 
-export const useAuth = () => {
+export const useAuth = function() {
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
@@ -10,126 +10,65 @@ export const useAuth = () => {
   return context;
 };
 
-export const AuthProvider = ({ children }) => {
+export const AuthProvider = function({ children }) {
   const [user, setUser] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    // Check if user is logged in on app start
-    const savedToken = localStorage.getItem('token');
-    const savedUser = localStorage.getItem('user');
-    
-    if (savedToken && savedUser) {
-      try {
-        setToken(savedToken);
-        setUser(JSON.parse(savedUser));
-      } catch (error) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-      }
-    }
-    setIsLoading(false);
+  useEffect(function() {
+    // Check if user is logged in on app load
+    checkAuthStatus();
   }, []);
 
-  const login = async (email, password) => {
+  const checkAuthStatus = function() {
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock successful login
-      const mockUser = {
-        id: '1',
-        name: 'John Doe',
-        email: email,
-        profile: {
-          interests: ['Technology', 'Programming'],
-          skills: ['JavaScript', 'React'],
-          education: { level: 'Bachelor' },
-          location: { city: 'New York' }
-        }
-      };
-      
-      const mockToken = 'mock-jwt-token-12345';
-      
-      setToken(mockToken);
-      setUser(mockUser);
-      localStorage.setItem('token', mockToken);
-      localStorage.setItem('user', JSON.stringify(mockUser));
-      
-      return { success: true, message: 'Login successful' };
+      const userData = localStorage.getItem('user');
+      if (userData) {
+        const parsedUser = JSON.parse(userData);
+        setUser(parsedUser);
+      }
     } catch (error) {
-      return { success: false, message: 'Login failed. Please try again.' };
+      console.error('Error parsing user data:', error);
+      localStorage.removeItem('user'); // Remove corrupted data
+    }
+    setLoading(false);
+  };
+
+  const login = function(userData) {
+    try {
+      localStorage.setItem('user', JSON.stringify(userData));
+      setUser(userData);
+      return { success: true };
+    } catch (error) {
+      console.error('Login error:', error);
+      return { success: false, message: 'Failed to save user data' };
     }
   };
 
-  const register = async (userData) => {
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock successful registration
-      const mockUser = {
-        id: '1',
-        name: userData.name,
-        email: userData.email,
-        profile: {
-          interests: [],
-          skills: [],
-          education: {},
-          location: {}
-        }
-      };
-      
-      const mockToken = 'mock-jwt-token-12345';
-      
-      setToken(mockToken);
-      setUser(mockUser);
-      localStorage.setItem('token', mockToken);
-      localStorage.setItem('user', JSON.stringify(mockUser));
-      
-      return { success: true, message: 'Registration successful' };
-    } catch (error) {
-      return { success: false, message: 'Registration failed. Please try again.' };
-    }
-  };
-
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem('token');
+  const logout = function() {
     localStorage.removeItem('user');
+    setUser(null);
   };
 
-  const updateProfile = async (profileData) => {
+  const updateUser = function(updatedData) {
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const updatedUser = { ...user, ...profileData };
-      setUser(updatedUser);
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      
-      return { success: true, message: 'Profile updated successfully' };
+      const newUserData = { ...user, ...updatedData };
+      localStorage.setItem('user', JSON.stringify(newUserData));
+      setUser(newUserData);
+      return { success: true };
     } catch (error) {
-      return { success: false, message: 'Profile update failed. Please try again.' };
+      console.error('Update user error:', error);
+      return { success: false };
     }
   };
 
   const value = {
     user,
-    isLoading,
-    token,
+    loading,
     login,
-    register,
     logout,
-    updateProfile,
+    updateUser,
     isAuthenticated: !!user
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return React.createElement(AuthContext.Provider, { value }, children);
 };
